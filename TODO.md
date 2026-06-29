@@ -1,4 +1,0 @@
-- update docs
-- check for UBs
-- write tests
-- publish 0.1.1 to crates.io
