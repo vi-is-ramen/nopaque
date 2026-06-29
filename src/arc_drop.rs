@@ -187,7 +187,7 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
 }
 
 /// Macro to construct an `ArcDrop` type.
-pub macro ArcDrop($($x:tt)+) { ArcDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> }
+pub macro ArcDrop($x:ty) { ArcDrop<{ crate::hash!(stringify!($x).as_bytes()) as usize }> }
 
 /// Type alias macro for `ArcDrop`.
-pub macro arc_drop($($x:tt)+) { <ArcDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }>> }
+pub macro arc_drop($x:ty) { <ArcDrop::<{ crate::hash!(stringify!($x).as_bytes()) as usize }>> }

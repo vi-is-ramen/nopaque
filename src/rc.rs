@@ -161,8 +161,8 @@ impl<const _T: usize, Tx> Rc<_T, Tx> {
     }
 }
 
-/// Macro to construct an `Rc` type with the hash of the given identifier.
-pub macro Rc($($x:tt)+) { Rc<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> }
+/// Macro to construct an `Rc` type.
+pub macro Rc($x:ty) { Rc<{ crate::hash!(stringify!($x).as_bytes()) as usize }> }
 
 /// Type alias macro for `Rc`.
-pub macro rc($($x:tt)+) { <Rc::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }>> }
+pub macro rc($x:ty) { <Rc::<{ crate::hash!(stringify!($xy).as_bytes()) as usize }>> }
