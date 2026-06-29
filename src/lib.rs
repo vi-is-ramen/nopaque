@@ -66,6 +66,7 @@
 extern crate std;
 
 extern crate alloc;
+#[macro_use] extern crate core;
 
 mod edrop;
 pub use edrop::*;
