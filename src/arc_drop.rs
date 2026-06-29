@@ -2,6 +2,7 @@ use core::{alloc::Layout, cmp::max, marker::PhantomData, sync::atomic::AtomicU16
 
 use crate::ExplicitDrop;
 
+/// Metadata for `ArcDrop`.
 #[repr(C)]
 #[doc(hidden)]
 struct Meta {
@@ -9,11 +10,45 @@ struct Meta {
     size: u32,
     align: u16,
     at: *mut u8,
-    #[cfg(debug_assertions)]
-    align_t: u16,
     drop: fn(&mut ()),
 }
 
+/// Atomic reference‑counted pointer with explicit drop semantics.
+///
+/// This is the `Drop` variant of [`Arc`]: when the last reference is dropped,
+/// the stored drop function (from `ExplicitDrop` or custom) is called before
+/// deallocation.
+///
+/// It is `Send` and `Sync` when `Tx` is `Send` and `Sync`.
+///
+/// # Provider / Consumer Forms
+///
+/// The [`ArcDrop!`] and [`arc_drop!`] macros provide two forms:
+/// - `ArcDrop!(&MyType)` → `Tx = MyType` (provider, can dereference).
+/// - `ArcDrop!(MyType)`   → `Tx = ()`     (consumer, opaque; `MyType` is just a token).
+///
+/// # Examples
+///
+/// ```
+/// # use nopaque::{ArcDrop, arc_drop, ExplicitDrop};
+/// use std::thread;
+///
+/// struct MyResource;
+///
+/// impl ExplicitDrop for MyResource {
+///     fn drop(&mut self) {
+///         println!("Cleaning up resource");
+///     }
+/// }
+///
+/// let a = <arc_drop!(&MyResource)>::new(MyResource);
+/// let a2 = a.clone();
+///
+/// thread::spawn(move || {
+///     let _ = a2; // drops in the thread
+/// }).join().unwrap();
+/// // The resource is dropped when the last reference (a) goes out of scope.
+/// ```
 #[repr(transparent)]
 pub struct ArcDrop<const _T: usize, Tx>(
     #[doc(hidden)] usize,
@@ -67,6 +102,7 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
 }
 
 impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
+    /// Creates a new `ArcDrop` using the `ExplicitDrop` implementation of `T`.
     pub fn new<T: ExplicitDrop>(t: T) -> Self {
         let align = max(align_of::<T>(), 8);
         let padding = (align - size_of::<Meta>() % align) % align;
@@ -80,15 +116,12 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
         meta.align = align as u16;
         meta.size = size as u32;
         meta.refc.store(1, core::sync::atomic::Ordering::Relaxed);
-        meta.drop = crate::edrop::call_explicit_drop::<T>; 
-        #[cfg(debug_assertions)]
-        {
-            meta.align_t = align_of::<T>() as u16;
-        }
+        meta.drop = crate::edrop::call_explicit_drop::<T>;
         *data = t;
         Self(addr as usize + padding + size_of::<Meta>(), PhantomData)
     }
 
+    /// Creates a new `ArcDrop` with a user‑provided drop function.
     pub fn new_with_drop<T>(t: T, drop: fn(&mut ())) -> Self {
         let align = max(align_of::<T>(), 8);
         let padding = (align - size_of::<Meta>() % align) % align;
@@ -103,10 +136,6 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
         meta.size = size as u32;
         meta.drop = drop;
         meta.refc.store(1, core::sync::atomic::Ordering::Relaxed);
-        #[cfg(debug_assertions)]
-        {
-            meta.align_t = align_of::<T>() as u16;
-        }
         *data = t;
         Self(addr as usize + padding + size_of::<Meta>(), PhantomData)
     }
@@ -121,11 +150,13 @@ impl<const _T: usize, Tx> core::ops::Deref for ArcDrop<_T, Tx> {
 }
 
 impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
+    /// Loads the current reference count atomically.
     #[inline(always)]
     pub unsafe fn rc_load(&self) -> usize {
         self.meta().refc.load(core::sync::atomic::Ordering::Relaxed) as _
     }
 
+    /// Stores a new reference count atomically.
     #[inline(always)]
     pub unsafe fn rc_store(&self, v: usize) {
         self.meta()
@@ -133,6 +164,7 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
             .store(v as _, core::sync::atomic::Ordering::Release)
     }
 
+    /// Atomically adds `v` to the reference count and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_add(&self, v: usize) -> usize {
         self.meta()
@@ -140,6 +172,7 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
             .fetch_add(v as _, core::sync::atomic::Ordering::AcqRel) as _
     }
 
+    /// Atomically subtracts `v` from the reference count and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_sub(&self, v: usize) -> usize {
         self.meta()
@@ -147,22 +180,30 @@ impl<const _T: usize, Tx> ArcDrop<_T, Tx> {
             .fetch_sub(v as _, core::sync::atomic::Ordering::AcqRel) as _
     }
 
+    /// Increments the reference count by 1 and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_inc(&self) -> usize {
         unsafe { self.rc_add(1) }
     }
 
+    /// Decrements the reference count by 1 and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_dec(&self) -> usize {
         unsafe { self.rc_sub(1) }
     }
 }
 
+/// Creates an `ArcDrop` type with the correct `_T` hash (no turbofish).
+///
+/// Two forms:
+/// - `ArcDrop!(&MyType)` → provider (Tx = MyType)
+/// - `ArcDrop!(MyType)`   → consumer (Tx = (), token need not be defined)
 pub macro ArcDrop {
     (&$($x:tt)+) => { ArcDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
     ($($x:tt)+) => { ArcDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, ()> },
 }
 
+/// Alias with turbofish syntax.
 pub macro arc_drop {
     (&$($x:tt)+) => { ArcDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
     ($($x:tt)+) => { ArcDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, ()> },

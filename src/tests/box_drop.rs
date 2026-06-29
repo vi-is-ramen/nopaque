@@ -22,7 +22,7 @@ fn box_drop_new_calls_explicit_drop() {
 #[test]
 fn box_drop_custom_drop_function() {
     static CUSTOM_DROP: AtomicUsize = AtomicUsize::new(0);
-    fn my_drop(_ptr: &mut ()) {
+    fn my_drop(_ptr: &mut ExplicitDropMe) {
         CUSTOM_DROP.fetch_add(1, Ordering::Relaxed);
     }
     let b = <boxed_drop!(&ExplicitDropMe)>::new_with_drop(ExplicitDropMe { _dummy: 0 }, my_drop);

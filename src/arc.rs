@@ -1,5 +1,8 @@
 use core::{alloc::Layout, cmp::max, marker::PhantomData, sync::atomic::AtomicU16};
 
+use crate::call_implicit_drop;
+
+/// Metadata for atomic reference‑counted pointers.
 #[repr(C)]
 #[doc(hidden)]
 struct Meta {
@@ -7,10 +10,39 @@ struct Meta {
     size: u32,
     align: u16,
     at: *mut u8,
-    #[cfg(debug_assertions)]
-    align_t: u16,
+    drop: fn(&mut ()),
 }
 
+/// A type‑guarded atomic reference‑counted pointer.
+///
+/// `Arc<_T, Tx>` is the atomic (thread‑safe) counterpart of [`Rc`]. It uses
+/// `AtomicU16` for the reference count, making it `Send` and `Sync` as long as
+/// `Tx` is `Send` and `Sync`.
+///
+/// All other properties (type‑guarding via `_T`, `repr(transparent)`, memory
+/// layout `[ padding ] [ Meta ] [ Tx ]`) are identical to `Rc`.
+///
+/// # Provider / Consumer Forms
+///
+/// The [`Arc!`] and [`arc!`] macros provide two forms:
+/// - `Arc!(&MyType)` → `Tx = MyType` (provider, can dereference).
+/// - `Arc!(MyType)`   → `Tx = ()`     (consumer, opaque; `MyType` is just a token).
+///
+/// # Examples
+///
+/// ```
+/// # use nopaque::{Arc, arc};
+/// use std::thread;
+/// 
+/// type Shared = i32;
+///
+/// let a = <arc!(&Shared)>::new(42);
+/// let a2 = a.clone();
+///
+/// thread::spawn(move || {
+///     assert_eq!(*a2, 42);
+/// }).join().unwrap();
+/// ```
 #[repr(transparent)]
 pub struct Arc<const _T: usize, Tx>(
     #[doc(hidden)] usize,
@@ -63,6 +95,9 @@ impl<const _T: usize, Tx> Arc<_T, Tx> {
 }
 
 impl<const _T: usize, Tx> Arc<_T, Tx> {
+    /// Creates a new `Arc` with initial reference count 1.
+    ///
+    /// The drop function is the implicit `drop_in_place` for `T`.
     pub fn new<T>(t: T) -> Self {
         let align = max(align_of::<T>(), 8);
         let padding = (align - size_of::<Meta>() % align) % align;
@@ -75,11 +110,8 @@ impl<const _T: usize, Tx> Arc<_T, Tx> {
         meta.at = addr;
         meta.align = align as u16;
         meta.size = size as u32;
+        meta.drop = call_implicit_drop::<T>;
         meta.refc.store(1, core::sync::atomic::Ordering::Relaxed);
-        #[cfg(debug_assertions)]
-        {
-            meta.align_t = align_of::<T>() as u16;
-        }
         *data = t;
         Self(addr as usize + padding + size_of::<Meta>(), PhantomData)
     }
@@ -94,11 +126,21 @@ impl<const _T: usize, Tx> core::ops::Deref for Arc<_T, Tx> {
 }
 
 impl<const _T: usize, Tx> Arc<_T, Tx> {
+    /// Loads the current reference count atomically.
+    ///
+    /// # Safety
+    ///
+    /// Provided for debugging; misuse can lead to data races if not synchronized.
     #[inline(always)]
     pub unsafe fn rc_load(&self) -> usize {
         self.meta().refc.load(core::sync::atomic::Ordering::Relaxed) as _
     }
 
+    /// Stores a new reference count atomically.
+    ///
+    /// # Safety
+    ///
+    /// Use with extreme care.
     #[inline(always)]
     pub unsafe fn rc_store(&self, v: usize) {
         self.meta()
@@ -106,6 +148,7 @@ impl<const _T: usize, Tx> Arc<_T, Tx> {
             .store(v as _, core::sync::atomic::Ordering::Release)
     }
 
+    /// Atomically adds `v` to the reference count and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_add(&self, v: usize) -> usize {
         self.meta()
@@ -113,6 +156,7 @@ impl<const _T: usize, Tx> Arc<_T, Tx> {
             .fetch_add(v as _, core::sync::atomic::Ordering::AcqRel) as _
     }
 
+    /// Atomically subtracts `v` from the reference count and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_sub(&self, v: usize) -> usize {
         self.meta()
@@ -120,22 +164,30 @@ impl<const _T: usize, Tx> Arc<_T, Tx> {
             .fetch_sub(v as _, core::sync::atomic::Ordering::AcqRel) as _
     }
 
+    /// Increments the reference count by 1 and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_inc(&self) -> usize {
         unsafe { self.rc_add(1) }
     }
 
+    /// Decrements the reference count by 1 and returns the previous value.
     #[inline(always)]
     pub unsafe fn rc_dec(&self) -> usize {
         unsafe { self.rc_sub(1) }
     }
 }
 
+/// Creates an `Arc` type with the correct `_T` hash (no turbofish).
+///
+/// Two forms:
+/// - `Arc!(&MyType)` → provider (Tx = MyType)
+/// - `Arc!(MyType)`   → consumer (Tx = (), token need not be defined)
 pub macro Arc {
     (&$($x:tt)+) => { Arc<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
     ($($x:tt)+) => { Arc<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, ()> },
 }
 
+/// Alias with turbofish syntax.
 pub macro arc {
     (&$($x:tt)+) => { Arc::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
     ($($x:tt)+) => { Arc::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, ()> },
