@@ -155,5 +155,13 @@ impl<const _T: usize, Tx> core::ops::DerefMut for Box<_T, Tx> {
 /// # macro_rules! hash { ($s:literal) => { 123 } }  // dummy
 /// type MyBox = Box!(MyStruct);
 /// ```
-pub macro Box($x:ty) { Box<{ crate::hash!(stringify!($x).as_bytes()) as usize }> }
-pub macro boxed($x:ty) { BoxDrop::<{ crate::hash!(stringify!($s).as_bytes()) as usize}> }
+pub macro Box {
+    ($x:ty) => { Box<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
+    (@$x:ty) => { Box<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+}
+
+pub macro boxed {
+    ($x:ty) => { Box::<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
+    (@$x:ty) => { Box::<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+}
+
