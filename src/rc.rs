@@ -1,6 +1,6 @@
 //! A non‑atomic reference‑counted opaque pointer (single‑threaded).
 
-use core::{alloc::Layout, cmp::max, sync::atomic::AtomicU16};
+use core::{alloc::Layout, cmp::max, marker::PhantomData, sync::atomic::AtomicU16};
 
 #[repr(C)]
 #[doc(hidden)]
@@ -21,25 +21,28 @@ struct Meta {
 ///
 /// See `Arc` for the atomic version.
 #[repr(transparent)]
-pub struct Rc<const _T: usize>(#[doc(hidden)] *const () /* points to HdlMeta.data */);
+pub struct Rc<const _T: usize, Tx = ()> (
+    #[doc(hidden)] *const (), /* points to HdlMeta.data */
+    PhantomData<Tx>,
+);
 
-impl<const _T: usize> core::fmt::Debug for Rc<_T> {
+impl<const _T: usize, Tx> core::fmt::Debug for Rc<_T, Tx> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("Arc![{:p}]", self.0))
     }
 }
 
-impl<const _T: usize> Clone for Rc<_T> {
+impl<const _T: usize, Tx> Clone for Rc<_T, Tx> {
     #[inline(always)]
     fn clone(&self) -> Self {
         let meta =
             unsafe { ((self.0 as usize - size_of::<Meta>()) as *mut Meta).as_mut_unchecked() };
         meta.refc.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
-        Self(self.0)
+        Self(self.0, PhantomData)
     }
 }
 
-impl<const _T: usize> Drop for Rc<_T> {
+impl<const _T: usize, Tx> Drop for Rc<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =
@@ -58,7 +61,7 @@ impl<const _T: usize> Drop for Rc<_T> {
 }
 
 // internal methods
-impl<const _T: usize> Rc<_T> {
+impl<const _T: usize, Tx> Rc<_T, Tx> {
     #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     fn meta(&self) -> &mut Meta {
@@ -67,7 +70,7 @@ impl<const _T: usize> Rc<_T> {
 }
 
 // constructors
-impl<const _T: usize> Rc<_T> {
+impl<const _T: usize, Tx> Rc<_T, Tx> {
     /// Creates a new `Rc` containing the given value.
     pub fn new<T>(t: T) -> Self {
         let align = max(align_of::<T>(), 8);
@@ -85,26 +88,12 @@ impl<const _T: usize> Rc<_T> {
             meta.align_t = align_of::<T>() as u16;
         }
         *data = t;
-        Self((addr as usize + padding + size_of::<Meta>()) as *mut ())
+        Self((addr as usize + padding + size_of::<Meta>()) as *mut (), PhantomData)
     }
 }
 
 // transformers
-impl<const _T: usize> Rc<_T> {
-    /// Downcast to an immutable reference. See `Box::downcast`.
-    #[inline(always)]
-    pub fn downcast<T>(&self) -> &T {
-        let meta = self.meta();
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(meta.align_t as usize == align_of::<T>());
-            debug_assert!(
-                meta.at as usize - meta.size as usize + self.0 as usize == size_of::<T>()
-            );
-        };
-        unsafe { (self.0 as *const T).as_ref_unchecked() }
-    }
-
+impl<const _T: usize, Tx> Rc<_T, Tx> {
     /// Converts to a raw pointer. See `Box::to_raw`.
     #[inline(always)]
     pub unsafe fn to_raw(&self) -> usize {
@@ -115,12 +104,20 @@ impl<const _T: usize> Rc<_T> {
     /// See `Arc::from_raw`.
     #[inline(always)]
     pub unsafe fn from_raw(addr: usize) -> Self {
-        Self(addr as _).clone()
+        Self(addr as _, PhantomData).clone()
+    }
+}
+
+impl<const _T: usize, Tx> core::ops::Deref for Rc<_T, Tx> {
+    type Target = Tx;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { (self.0 as *const Tx).as_ref_unchecked() }
     }
 }
 
 // direct RC interaction, ACTUALLY UNSAFE
-impl<const _T: usize> Rc<_T> {
+impl<const _T: usize, Tx> Rc<_T, Tx> {
     /// Reads the current reference count (non‑atomic).
     #[inline(always)]
     pub unsafe fn rc_load(&self) -> usize {

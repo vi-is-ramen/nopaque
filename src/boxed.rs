@@ -1,6 +1,6 @@
 //! A non‑reference‑counted, non‑drop‑customisable opaque pointer.
 
-use core::{alloc::Layout, cmp::max};
+use core::{alloc::Layout, cmp::max, marker::PhantomData};
 
 #[repr(C)]
 #[doc(hidden)]
@@ -51,15 +51,18 @@ struct Meta {
 /// assert_eq!(*val, 42);
 /// ```
 #[repr(transparent)]
-pub struct Box<const _T: usize>(#[doc(hidden)] *const () /* points to HdlMeta.data */);
+pub struct Box<const _T: usize, Tx = ()> (
+    #[doc(hidden)] *const (), /* points to HdlMeta.data */
+    PhantomData<Tx>,
+);
 
-impl<const _T: usize> core::fmt::Debug for Box<_T> {
+impl<const _T: usize, Tx> core::fmt::Debug for Box<_T, Tx> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("Box![{:p}]", self.0))
     }
 }
 
-impl<const _T: usize> Drop for Box<_T> {
+impl<const _T: usize, Tx> Drop for Box<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =
@@ -73,17 +76,8 @@ impl<const _T: usize> Drop for Box<_T> {
     }
 }
 
-// internal methods
-impl<const _T: usize> Box<_T> {
-    #[inline(always)]
-    #[allow(clippy::mut_from_ref)]
-    fn meta(&self) -> &mut Meta {
-        unsafe { ((self.0 as usize - size_of::<Meta>()) as *mut Meta).as_mut_unchecked() }
-    }
-}
-
 // constructors
-impl<const _T: usize> Box<_T> {
+impl<const _T: usize, Tx> Box<_T, Tx> {
     /// Creates a new `Box` containing the given value.
     ///
     /// The hash constant `_T` is typically provided by the `Box!` macro.
@@ -103,51 +97,12 @@ impl<const _T: usize> Box<_T> {
             meta.align_t = align_of::<T>() as u16;
         }
         *data = t;
-        Self((addr as usize + padding + size_of::<Meta>()) as *mut ())
+        Self((addr as usize + padding + size_of::<Meta>()) as *mut (), PhantomData)
     }
 }
 
 // transformers
-impl<const _T: usize> Box<_T> {
-    /// Attempts to downcast to a reference of type `T`.
-    ///
-    /// # Panics
-    ///
-    /// In debug builds, this method will panic if the stored type’s alignment
-    /// does not match `T`’s alignment, or if the size does not match. In release
-    /// builds, these checks are omitted and the behaviour is undefined if the
-    /// hash is wrong.
-    #[inline(always)]
-    pub fn downcast<T>(&self) -> &T {
-        let meta = self.meta();
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(meta.align_t as usize == align_of::<T>());
-            debug_assert!(
-                meta.at as usize - meta.size as usize + self.0 as usize == size_of::<T>()
-            );
-        };
-        unsafe { (self.0 as *const T).as_ref_unchecked() }
-    }
-
-    /// Attempts to downcast to a mutable reference of type `T`.
-    ///
-    /// # Panics
-    ///
-    /// Same as `downcast`.
-    #[inline(always)]
-    pub fn downcast_mut<T>(&mut self) -> &mut T {
-        let meta = self.meta();
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(meta.align_t as usize == align_of::<T>());
-            debug_assert!(
-                meta.at as usize - meta.size as usize + self.0 as usize == size_of::<T>()
-            );
-        };
-        unsafe { (self.0 as *mut T).as_mut_unchecked() }
-    }
-
+impl<const _T: usize, Tx> Box<_T, Tx> {
     /// Converts the handle to a raw `usize` pointer.
     ///
     /// # Safety
@@ -169,7 +124,21 @@ impl<const _T: usize> Box<_T> {
     /// the same hash constant `_T`. The handle must not have been dropped yet.
     #[inline(always)]
     pub unsafe fn from_raw(addr: usize) -> Self {
-        Self(addr as _)
+        Self(addr as _, PhantomData)
+    }
+}
+
+impl<const _T: usize, Tx> core::ops::Deref for Box<_T, Tx> {
+    type Target = Tx;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { (self.0 as *const Tx).as_ref_unchecked() }
+    }
+}
+
+impl<const _T: usize, Tx> core::ops::DerefMut for Box<_T, Tx> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { (self.0 as *mut Tx).as_mut_unchecked() }
     }
 }
 

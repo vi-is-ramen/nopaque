@@ -1,6 +1,6 @@
 //! A non‑reference‑counted opaque pointer with custom drop support.
 
-use core::{alloc::Layout, cmp::max, ptr::addr_of};
+use core::{alloc::Layout, cmp::max, marker::PhantomData, ptr::addr_of};
 
 use crate::ExplicitDrop;
 
@@ -44,15 +44,18 @@ struct Meta {
 /// // The destructor will be called when `b` goes out of scope.
 /// ```
 #[repr(transparent)]
-pub struct BoxDrop<const _T: usize>(#[doc(hidden)] *const () /* points to HdlMeta.data */);
+pub struct BoxDrop<const _T: usize, Tx = ()> (
+    #[doc(hidden)] *const (), /* points to HdlMeta.data */
+    PhantomData<Tx>
+);
 
-impl<const _T: usize> core::fmt::Debug for BoxDrop<_T> {
+impl<const _T: usize, Tx> core::fmt::Debug for BoxDrop<_T, Tx> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("BoxDrop![{:p}]", self.0))
     }
 }
 
-impl<const _T: usize> Drop for BoxDrop<_T> {
+impl<const _T: usize, Tx> Drop for BoxDrop<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =
@@ -66,17 +69,8 @@ impl<const _T: usize> Drop for BoxDrop<_T> {
     }
 }
 
-// internal methods
-impl<const _T: usize> BoxDrop<_T> {
-    #[inline(always)]
-    #[allow(clippy::mut_from_ref)]
-    fn meta(&self) -> &mut Meta {
-        unsafe { ((self.0 as usize - size_of::<Meta>()) as *mut Meta).as_mut_unchecked() }
-    }
-}
-
 // constructors
-impl<const _T: usize> BoxDrop<_T> {
+impl<const _T: usize, Tx> BoxDrop<_T, Tx> {
     /// Creates a new `BoxDrop` from a value that implements `ExplicitDrop`.
     pub fn new<T: ExplicitDrop>(t: T) -> Self {
         let align = max(align_of::<T>(), 8);
@@ -96,7 +90,7 @@ impl<const _T: usize> BoxDrop<_T> {
             meta.align_t = align_of::<T>() as u16;
         }
         *data = t;
-        Self((addr as usize + padding + size_of::<Meta>()) as *mut ())
+        Self((addr as usize + padding + size_of::<Meta>()) as *mut (), PhantomData)
     }
 
     /// Creates a new `BoxDrop` with a custom drop function.
@@ -121,39 +115,12 @@ impl<const _T: usize> BoxDrop<_T> {
             meta.align_t = align_of::<T>() as u16;
         }
         *data = t;
-        Self((addr as usize + padding + size_of::<Meta>()) as *mut ())
+        Self((addr as usize + padding + size_of::<Meta>()) as *mut (), PhantomData)
     }
 }
 
 // transformers
-impl<const _T: usize> BoxDrop<_T> {
-    /// Downcast to an immutable reference. See `Box::downcast`.
-    #[inline(always)]
-    pub fn downcast<T>(&self) -> &T {
-        let meta = self.meta();
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(meta.align_t as usize == align_of::<T>());
-            debug_assert!(
-                meta.at as usize - meta.size as usize + self.0 as usize == size_of::<T>()
-            );
-        };
-        unsafe { (self.0 as *const T).as_ref_unchecked() }
-    }
-
-    /// Downcast to a mutable reference. See `Box::downcast_mut`.
-    #[inline(always)]
-    pub fn downcast_mut<T>(&mut self) -> &mut T {
-        let meta = self.meta();
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(meta.align_t as usize == align_of::<T>());
-            debug_assert!(
-                meta.at as usize - meta.size as usize + self.0 as usize == size_of::<T>()
-            );
-        };
-        unsafe { (self.0 as *mut T).as_mut_unchecked() }
-    }
+impl<const _T: usize, Tx> BoxDrop<_T, Tx> {
 
     /// Converts to a raw pointer. See `Box::to_raw`.
     #[inline(always)]
@@ -164,7 +131,21 @@ impl<const _T: usize> BoxDrop<_T> {
     /// Reconstructs from a raw pointer. See `Box::from_raw`.
     #[inline(always)]
     pub unsafe fn from_raw(addr: usize) -> Self {
-        Self(addr as _)
+        Self(addr as _, PhantomData)
+    }
+}
+
+impl<const _T: usize, Tx> core::ops::Deref for BoxDrop<_T, Tx> {
+    type Target = Tx;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { (self.0 as *const Tx).as_ref_unchecked() }
+    }
+}
+
+impl<const _T: usize, Tx> core::ops::DerefMut for BoxDrop<_T, Tx> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { (self.0 as *mut Tx).as_mut_unchecked() }
     }
 }
 

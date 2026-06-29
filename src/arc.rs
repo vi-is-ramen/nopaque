@@ -1,6 +1,6 @@
 //! An atomic reference‑counted opaque pointer (thread‑safe).
 
-use core::{alloc::Layout, cmp::max, sync::atomic::AtomicU16};
+use core::{alloc::Layout, cmp::max, marker::PhantomData, sync::atomic::AtomicU16};
 
 #[repr(C)]
 #[doc(hidden)]
@@ -38,25 +38,28 @@ struct Meta {
 /// }).join().unwrap();
 /// ```
 #[repr(transparent)]
-pub struct Arc<const _T: usize>(#[doc(hidden)] *const () /* points to HdlMeta.data */);
+pub struct Arc<const _T: usize, Tx = ()>(
+    #[doc(hidden)] *const (), /* points to HdlMeta.data */
+    PhantomData<Tx>,
+);
 
-impl<const _T: usize> core::fmt::Debug for Arc<_T> {
+impl<const _T: usize, Tx> core::fmt::Debug for Arc<_T, Tx> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!("Arc![{:p}]", self.0))
     }
 }
 
-impl<const _T: usize> Clone for Arc<_T> {
+impl<const _T: usize, Tx> Clone for Arc<_T, Tx> {
     #[inline(always)]
     fn clone(&self) -> Self {
         let meta =
             unsafe { ((self.0 as usize - size_of::<Meta>()) as *mut Meta).as_mut_unchecked() };
         meta.refc.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
-        Self(self.0)
+        Self(self.0, PhantomData)
     }
 }
 
-impl<const _T: usize> Drop for Arc<_T> {
+impl<const _T: usize, Tx> Drop for Arc<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =
@@ -75,7 +78,7 @@ impl<const _T: usize> Drop for Arc<_T> {
 }
 
 // internal methods
-impl<const _T: usize> Arc<_T> {
+impl<const _T: usize, Tx> Arc<_T, Tx> {
     #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     fn meta(&self) -> &mut Meta {
@@ -84,7 +87,7 @@ impl<const _T: usize> Arc<_T> {
 }
 
 // constructors
-impl<const _T: usize> Arc<_T> {
+impl<const _T: usize, Tx> Arc<_T, Tx> {
     /// Creates a new `Arc` containing the given value.
     pub fn new<T>(t: T) -> Self {
         let align = max(align_of::<T>(), 8);
@@ -102,48 +105,20 @@ impl<const _T: usize> Arc<_T> {
             meta.align_t = align_of::<T>() as u16;
         }
         *data = t;
-        Self((addr as usize + padding + size_of::<Meta>()) as *mut ())
+        Self((addr as usize + padding + size_of::<Meta>()) as *mut (), PhantomData)
     }
 }
 
-// transformers
-impl<const _T: usize> Arc<_T> {
-    /// Downcast to an immutable reference. See `Box::downcast`.
-    #[inline(always)]
-    pub fn downcast<T>(&self) -> &T {
-        let meta = self.meta();
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(meta.align_t as usize == align_of::<T>());
-            debug_assert!(
-                meta.at as usize - meta.size as usize + self.0 as usize == size_of::<T>()
-            );
-        };
-        unsafe { (self.0 as *const T).as_ref_unchecked() }
-    }
+impl<const _T: usize, Tx> core::ops::Deref for Arc<_T, Tx> {
+    type Target = Tx;
 
-    /// Converts to a raw pointer. See `Box::to_raw`.
-    #[inline(always)]
-    pub unsafe fn to_raw(&self) -> usize {
-        self.0 as _
-    }
-
-    /// Reconstructs from a raw pointer, **incrementing** the reference count.
-    ///
-    /// # Safety
-    ///
-    /// The address must point to a valid `Arc` allocation with the same hash.
-    /// The reference count is incremented by one to account for this new handle.
-    #[inline(always)]
-    pub unsafe fn from_raw(addr: usize) -> Self {
-        // Cloning increments the count, ensuring the handle we return
-        // participates in the reference counting correctly.
-        Self(addr as _).clone()
+    fn deref(&self) -> &Self::Target {
+        unsafe { (self.0 as *const Tx).as_ref_unchecked() }
     }
 }
 
 // direct RC interaction, ACTUALLY UNSAFE
-impl<const _T: usize> Arc<_T> {
+impl<const _T: usize, Tx> Arc<_T, Tx> {
     /// Reads the current reference count.
     ///
     /// # Safety
