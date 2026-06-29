@@ -184,12 +184,11 @@ impl<const _T: usize, Tx> RcDrop<_T, Tx> {
 
 /// Macro to construct an `RcDrop` type.
 pub macro RcDrop {
-    ($x:ty) => { RcDrop<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
-    (@$x:ty) => { RcDrop<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+    ($($x:tt)+) => { RcDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> },
+    (@$($x:tt)+) => { RcDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
 }
 
-/// Type alias macro for `RcDrop`.
 pub macro rc_drop {
-    ($x:ty) => { RcDrop::<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
-    (@$x:ty) => { RcDrop::<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+    ($($x:tt)+) => { RcDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> },
+    (@$($x:tt)+) => { RcDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
 }

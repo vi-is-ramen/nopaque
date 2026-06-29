@@ -151,11 +151,11 @@ impl<const _T: usize, Tx> core::ops::DerefMut for BoxDrop<_T, Tx> {
 
 /// Macro to construct a `BoxDrop` type with the hash of the given identifier.
 pub macro BoxDrop {
-    ($x:ty) => { BoxDrop<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
-    (@$x:ty) => { BoxDrop<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+    ($($x:tt)+) => { BoxDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> },
+    (@$($x:tt)+) => { BoxDrop<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
 }
 
 pub macro boxed_drop {
-    ($x:ty) => { BoxDrop::<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
-    (@$x:ty) => { BoxDrop::<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+    ($($x:tt)+) => { BoxDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> },
+    (@$($x:tt)+) => { BoxDrop::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
 }

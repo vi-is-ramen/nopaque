@@ -174,11 +174,11 @@ impl<const _T: usize, Tx> Arc<_T, Tx> {
 
 /// Macro to construct an `Arc` type with the hash of the given identifier.
 pub macro Arc {
-    ($x:ty) => { Arc<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
-    (@$x:ty) => { Arc<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+    ($($x:tt)+) => { Arc<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> },
+    (@$($x:tt)+) => { Arc<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
 }
 
 pub macro arc {
-    ($x:ty) => { Arc::<{ crate::hash!(stringify!($x).as_bytes()) as usize }> },
-    (@$x:ty) => { Arc::<{ crate::hash!(stringify!($x).as_bytes()) as usize }, $x> },
+    ($($x:tt)+) => { Arc::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }> },
+    (@$($x:tt)+) => { Arc::<{ crate::hash!(stringify!($($x)+).as_bytes()) as usize }, $($x)+> },
 }
