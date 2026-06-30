@@ -1,4 +1,5 @@
 use core::{alloc::Layout, cmp::max, marker::PhantomData};
+use core::mem::size_of;
 
 use crate::call_implicit_drop;
 
@@ -83,7 +84,7 @@ impl<const _T: usize, Tx> Clone for Rc<_T, Tx> {
     }
 }
 
-impl<const _T: usize, Tx> Drop for Rc<_T, Tx> {
+impl<const _T: usize, Tx> core::ops::Drop for Rc<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =

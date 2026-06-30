@@ -4,6 +4,8 @@
 //! provide a `drop` method that is called before deallocation when using
 //! the `*Drop` pointer variants (`BoxDrop`, `RcDrop`, `ArcDrop`).
 
+use core::ptr::addr_of;
+
 /// A trait for types that need explicit drop logic.
 ///
 /// When a type implements `ExplicitDrop`, its `drop` method will be invoked
@@ -44,7 +46,7 @@ pub const trait ExplicitDrop {
 /// Used as a drop function pointer in the metadata.
 #[doc(hidden)]
 pub(crate) fn call_explicit_drop<T: ExplicitDrop>(ptr: &mut ()) {
-    <T as ExplicitDrop>::drop(unsafe { (core::ptr::addr_of!(*ptr) as *mut T).as_mut_unchecked() });
+    <T as ExplicitDrop>::drop(unsafe { (addr_of!(*ptr) as *mut T).as_mut_unchecked() });
 }
 
 /// Internal: calls `drop_in_place` for the type.

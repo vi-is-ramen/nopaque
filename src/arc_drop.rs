@@ -1,4 +1,5 @@
 use core::{alloc::Layout, cmp::max, marker::PhantomData, sync::atomic::AtomicU16};
+use core::mem::size_of;
 
 use crate::ExplicitDrop;
 
@@ -74,7 +75,7 @@ impl<const _T: usize, Tx> Clone for ArcDrop<_T, Tx> {
     }
 }
 
-impl<const _T: usize, Tx> Drop for ArcDrop<_T, Tx> {
+impl<const _T: usize, Tx> core::ops::Drop for ArcDrop<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =

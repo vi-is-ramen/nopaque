@@ -1,4 +1,5 @@
 use core::{alloc::Layout, cmp::max, marker::PhantomData, ptr::addr_of};
+use core::mem::size_of;
 
 use crate::ExplicitDrop;
 
@@ -88,7 +89,7 @@ impl<const _T: usize, Tx> core::fmt::Debug for BoxDrop<_T, Tx> {
     }
 }
 
-impl<const _T: usize, Tx> Drop for BoxDrop<_T, Tx> {
+impl<const _T: usize, Tx> core::ops::Drop for BoxDrop<_T, Tx> {
     #[inline(always)]
     fn drop(&mut self) {
         let meta =
