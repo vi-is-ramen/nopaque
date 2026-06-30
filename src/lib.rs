@@ -1,5 +1,5 @@
 #![feature(const_trait_impl, decl_macro)]
-#![cfg_attr(feature = "std", no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 //! # nopaque – Type‑Safe Opaque Pointers for ABI Boundaries
 //!

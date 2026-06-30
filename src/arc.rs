@@ -1,6 +1,8 @@
 use core::{alloc::Layout, cmp::max, marker::PhantomData, sync::atomic::AtomicU16};
 use core::mem::size_of;
 use core::mem::align_of;
+use core::clone::Clone;
+use core::marker::{Sync, Send};
 
 use crate::call_implicit_drop;
 
