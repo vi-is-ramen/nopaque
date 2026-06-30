@@ -1,5 +1,6 @@
 use core::{alloc::Layout, cmp::max, marker::PhantomData, ptr::addr_of};
 use core::mem::size_of;
+use core::mem::align_of;
 
 use crate::ExplicitDrop;
 
